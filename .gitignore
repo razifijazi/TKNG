@@ -1,0 +1,5 @@
+photo/
+accounts.txt
+used.txt
+*.pyc
+__pycache__/
