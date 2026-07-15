@@ -218,12 +218,28 @@ def register_one(page, email, password, idx, total):
         apikey = None
         for reveal_attempt in range(3):
             try:
-                row = page.locator("tr:has-text('auto-key')")
+                # Row could be <tr> or <div> depending on table impl
+                row = page.locator("tr", has_text="auto-key")
+                if row.count() == 0:
+                    row = page.locator("div", has_text="auto-key").first
+                # Eye icon = first button in row (reveal)
                 eye = row.locator("button").first
+                eye.wait_for(state="visible", timeout=5000)
                 eye.click()
                 time.sleep(3)
             except Exception as e:
                 log(t, f"  Reveal error: {e}", Y)
+                # Try copy button as fallback
+                try:
+                    copy = row.locator("button").nth(1)
+                    copy.click()
+                    time.sleep(1)
+                    clip = page.evaluate("navigator.clipboard.readText()")
+                    if clip and len(clip) > 20:
+                        apikey = clip
+                        break
+                except:
+                    pass
 
             # Extract key from page text
             body = page.inner_text("body")
@@ -319,6 +335,7 @@ def main():
             ctx_opts = {
                 "viewport": {"width": 1280, "height": 800},
                 "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                "permissions": ["clipboard-read", "clipboard-write"],
             }
             if proxy_cfg:
                 ctx_opts["proxy"] = proxy_cfg
