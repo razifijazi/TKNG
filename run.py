@@ -94,33 +94,51 @@ def register_one(page, email, password, idx, total):
         # Login
         log(t, "  Login...", Y)
         page.goto(SIGNUP_URL, wait_until="networkidle")
-        time.sleep(2)
+        time.sleep(5)
 
-        # Click Google — navigates to same tab
+        # Click Google — navigates to same tab (or popup)
         btn = page.locator("button:has-text('Google')")
         btn.wait_for(state="visible", timeout=10000)
         time.sleep(1)
-        btn.click()
-
-        # Wait for Google login page to appear
+        popup = None
         try:
-            page.wait_for_selector("#identifierId", state="visible", timeout=15000)
+            with page.expect_popup(timeout=8000) as popup_info:
+                btn.click()
+            popup = popup_info.value
+            popup.wait_for_load_state("load")
         except:
+            # No popup — same tab navigated to Google
+            if "accounts.google.com" in page.url:
+                popup = page
+            else:
+                # Wait a bit more for same-tab nav
+                try:
+                    page.wait_for_url("**/accounts.google.com/**", timeout=10000)
+                    popup = page
+                except:
+                    popup = None
+
+        if not popup:
             # Retry once — reload and try again
             log(t, "  Retry...", Y)
             page.goto(SIGNUP_URL, wait_until="networkidle")
-            time.sleep(3)
+            time.sleep(5)
             btn = page.locator("button:has-text('Google')")
             btn.wait_for(state="visible", timeout=10000)
-            btn.click()
             try:
-                page.wait_for_selector("#identifierId", state="visible", timeout=15000)
+                with page.expect_popup(timeout=8000) as popup_info:
+                    btn.click()
+                popup = popup_info.value
+                popup.wait_for_load_state("load")
             except:
-                log(t, "  Google button failed", R)
-                ss(page, f"e{idx:02d}_fail")
-                return email, password, "LOGIN_FAILED"
+                if "accounts.google.com" in page.url:
+                    popup = page
+                else:
+                    log(t, "  Google button failed", R)
+                    ss(page, f"e{idx:02d}_fail")
+                    return email, password, "LOGIN_FAILED"
 
-        target = page
+        target = popup if popup else page
 
         target.wait_for_selector("#identifierId", state="visible", timeout=20000)
         target.fill("#identifierId", email)
@@ -166,6 +184,14 @@ def register_one(page, email, password, idx, total):
                     time.sleep(5)
                 except:
                     pass
+
+        # If popup, wait for it to close (redirect back to main page)
+        if popup and popup != page:
+            try:
+                popup.wait_for_event("close", timeout=20000)
+            except:
+                pass
+            time.sleep(2)
 
         # Verify login
         if "tokengo" not in page.url:
