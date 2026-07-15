@@ -96,21 +96,30 @@ def register_one(page, email, password, idx, total):
         page.goto(SIGNUP_URL, wait_until="networkidle")
         time.sleep(2)
 
-        # Click Google — could open popup or navigate same tab
+        # Click Google — retry up to 3x (button sometimes not ready)
         popup = None
-        try:
-            with page.expect_popup(timeout=5000) as popup_info:
-                page.click("button:has-text('Google')")
-            popup = popup_info.value
-            popup.wait_for_load_state("networkidle")
-        except:
-            # No popup — maybe same tab navigated to Google
-            time.sleep(2)
-            if "accounts.google.com" in page.url:
-                popup = page
+        for attempt in range(3):
+            try:
+                btn = page.locator("button:has-text('Google')")
+                btn.wait_for(state="visible", timeout=10000)
+                time.sleep(1)
+                with page.expect_popup(timeout=8000) as popup_info:
+                    btn.click()
+                popup = popup_info.value
+                popup.wait_for_load_state("networkidle")
+                break
+            except:
+                time.sleep(2)
+                if "accounts.google.com" in page.url:
+                    popup = page
+                    break
+                if attempt < 2:
+                    log(t, f"  Retry {attempt+2}/3...", Y)
+                    page.goto(SIGNUP_URL, wait_until="networkidle")
+                    time.sleep(3)
 
         if not popup:
-            log(t, "  Google button failed", R)
+            log(t, "  Google button failed after 3 tries", R)
             ss(page, f"e{idx:02d}_fail")
             return email, password, "LOGIN_FAILED"
 
