@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).parent
 EMAIL_FILE = BASE_DIR / "email.txt"
 RESULT_FILE = BASE_DIR / "accounts.txt"
 USED_FILE = BASE_DIR / "used.txt"
+FAILED_FILE = BASE_DIR / "failed.txt"
 PROXY_FILE = BASE_DIR / "proxies.txt"
 SIGNUP_URL = "https://dashboard.tokengo.com/sign-up?aff=eIFh"
 
@@ -271,11 +272,13 @@ def main():
             result = register_one(page, email, password, i, len(todo))
             results.append(result)
 
-            with open(RESULT_FILE, "a") as f:
+            is_fail = any(result[2].startswith(x) for x in ("ERROR", "LOGIN_FAILED", "EXTRACT_FAILED"))
+            with open(FAILED_FILE if is_fail else RESULT_FILE, "a") as f:
                 f.write(f"{result[0]}|{result[1]}|{result[2]}\n")
-
-            if not any(result[2].startswith(x) for x in ("ERROR", "LOGIN_FAILED", "EXTRACT_FAILED")):
+            if not is_fail:
                 move_to_used(result[0])
+
+
 
             ctx.close()
 
