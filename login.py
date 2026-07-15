@@ -277,27 +277,32 @@ def login_and_get_key(ctx, email, password, idx, total, proxies=None):
         except:
             pass
 
-        # OAuth consent
-        if "signin/oauth/id" in target.url or "oauth/consent" in target.url:
-            log(t, "  OAuth consent...", Y)
-            try:
-                time.sleep(2)
-                cont = target.locator("button:has-text('Continue')")
-                cont.wait_for(state="visible", timeout=15000)
-                cont.click()
-                time.sleep(3)
-                time.sleep(5)
-            except:
+        # OAuth consent — Google's consent URL varies (/o/oauth2/v2/auth,
+        # signin/oauth/consent, ...), so detect by the "Continue" button
+        # instead of the URL. Google may show the consent screen once or
+        # twice, and it can land in the main page, the popup, or a frame.
+        log(t, "  OAuth consent...", Y)
+        consent_targets = [target]
+        if popup and popup != page:
+            consent_targets.append(popup)
+        if page not in consent_targets:
+            consent_targets.append(page)
+        for _ in range(2):  # Google sometimes shows consent twice
+            clicked = False
+            for ct in consent_targets:
                 try:
-                    time.sleep(3)
-                    time.sleep(3)
-                    cont = target.locator("button:has-text('Continue')")
-                    cont.wait_for(state="visible", timeout=10000)
+                    cont = ct.locator("button:has-text('Continue')")
+                    cont.wait_for(state="visible", timeout=8000)
                     cont.click()
+                    clicked = True
                     time.sleep(3)
-                    time.sleep(5)
-                except:
-                    pass
+                    time.sleep(3)
+                    break
+                except Exception:
+                    continue
+            if not clicked:
+                break
+        time.sleep(2)
 
         # If popup, wait for it to close (redirect back to main page)
         if popup and popup != page:
