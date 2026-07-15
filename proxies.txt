@@ -1,2 +1,1 @@
-# format: host:port:user:pass
-global.rotgb.711proxy.com:10000:USER803280-zone-custom-region-SG:24f2d3
+us.cliproxy.io:3010:twwc1230937-region-SG-sid-ujTmSSP2-t-5:wrxjugwc

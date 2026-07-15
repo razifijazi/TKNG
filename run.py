@@ -183,14 +183,29 @@ def register_one(page, email, password, idx, total):
         body = page.inner_text("body")
         if "auto-key" not in body:
             log(t, "  Create key...", Y)
-            page.locator("button:has-text('New API Key')").click()
+            # Click "New API Key" button (top-right) — retry if not ready
+            for attempt in range(3):
+                try:
+                    page.locator("button:has-text('New API Key')").click(timeout=8000)
+                    break
+                except:
+                    log(t, f"  Retry button {attempt+2}/3...", Y)
+                    time.sleep(2)
+                    page.reload(wait_until="networkidle")
+                    time.sleep(3)
             time.sleep(2)
-            page.locator("input").first.fill("auto-key")
+            # Fill name (random/any)
             try:
-                page.locator("button:has-text('Create')").click()
+                page.locator("input").first.fill("auto-key")
             except:
-                page.locator("button[type='submit']").click()
-            time.sleep(5)
+                pass
+            # Click Create — always "fails" but key IS created
+            try:
+                page.locator("button:has-text('Create')").click(timeout=5000)
+            except:
+                pass
+            # Immediately reload — created key appears in table
+            time.sleep(2)
             page.reload(wait_until="networkidle")
             time.sleep(3)
 
