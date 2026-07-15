@@ -86,6 +86,62 @@ def move_to_used(email):
         with open(USED_FILE, "a") as f:
             f.write(moved + "\n")
 
+def click_google(page, t):
+    """Click the Google OAuth button, return the page/frame that shows Google's
+    email field (#identifierId). Google may render in the main frame (URL stays
+    tokengo until submit), a popup, or an iframe — so we detect by the presence
+    of #identifierId, NOT by URL change. Up to 4 attempts with reload."""
+    for attempt in range(4):
+        try:
+            btn = page.locator("button:has-text('Google')")
+            btn.wait_for(state="visible", timeout=10000)
+            time.sleep(3)
+            popups = []
+            page.on("popup", lambda p: popups.append(p))
+            page.evaluate("""() => {
+                const b = [...document.querySelectorAll('button')]
+                    .find(x => /google/i.test(x.textContent || ''));
+                if (b) { b.click(); return true; }
+                return false;
+            }""")
+            try:
+                page.wait_for_selector("#identifierId", state="visible", timeout=15000)
+                return page
+            except Exception:
+                pass
+            for cand in list(popups):
+                try:
+                    cand.wait_for_selector("#identifierId", state="visible", timeout=10000)
+                    return cand
+                except Exception:
+                    pass
+            for f in page.frames:
+                try:
+                    f.wait_for_selector("#identifierId", state="visible", timeout=5000)
+                    return f
+                except Exception:
+                    pass
+            try:
+                btn.click(timeout=10000, force=True)
+            except Exception:
+                pass
+            try:
+                page.wait_for_selector("#identifierId", state="visible", timeout=10000)
+                return page
+            except Exception:
+                pass
+            log(t, f"  click attempt {attempt+1}: no Google field, retry...", Y)
+        except Exception as e:
+            log(t, f"  click attempt {attempt+1} err: {e}", Y)
+        if attempt < 3:
+            try:
+                page.goto(SIGNUP_URL, wait_until="networkidle")
+                time.sleep(6)
+            except Exception:
+                pass
+    return None
+
+
 def register_one(page, email, password, idx, total):
     t = f"[{idx}/{total}]"
     log(t, f"{B}{email}{D}", C)
@@ -96,47 +152,12 @@ def register_one(page, email, password, idx, total):
         page.goto(SIGNUP_URL, wait_until="networkidle")
         time.sleep(5)
 
-        # Click Google — navigates to same tab (or popup)
-        btn = page.locator("button:has-text('Google')")
-        btn.wait_for(state="visible", timeout=10000)
-        time.sleep(1)
-        popup = None
-        try:
-            with page.expect_popup(timeout=8000) as popup_info:
-                btn.click()
-            popup = popup_info.value
-            popup.wait_for_load_state("load")
-        except:
-            # No popup — same tab navigated to Google
-            if "accounts.google.com" in page.url:
-                popup = page
-            else:
-                # Wait a bit more for same-tab nav
-                try:
-                    page.wait_for_url("**/accounts.google.com/**", timeout=10000)
-                    popup = page
-                except:
-                    popup = None
-
+        # Click Google — robust (popup / same-tab / iframe), up to 4 attempts
+        popup = click_google(page, t)
         if not popup:
-            # Retry once — reload and try again
-            log(t, "  Retry...", Y)
-            page.goto(SIGNUP_URL, wait_until="networkidle")
-            time.sleep(5)
-            btn = page.locator("button:has-text('Google')")
-            btn.wait_for(state="visible", timeout=10000)
-            try:
-                with page.expect_popup(timeout=8000) as popup_info:
-                    btn.click()
-                popup = popup_info.value
-                popup.wait_for_load_state("load")
-            except:
-                if "accounts.google.com" in page.url:
-                    popup = page
-                else:
-                    log(t, "  Google button failed", R)
-                    ss(page, f"e{idx:02d}_fail")
-                    return email, password, "LOGIN_FAILED"
+            log(t, "  Google button failed", R)
+            ss(page, f"e{idx:02d}_fail")
+            return email, password, "LOGIN_FAILED"
 
         target = popup if popup else page
 
