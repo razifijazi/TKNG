@@ -86,6 +86,23 @@ def move_to_used(email):
         with open(USED_FILE, "a") as f:
             f.write(moved + "\n")
 
+def proxy_ip_str(proxy_cfg):
+    """Return 'IP (country) org' for a proxy config, or '?' on failure."""
+    import subprocess, json as _json
+    server = proxy_cfg["server"].replace("http://", "")
+    host, port = server.split(":")
+    curl_cmd = ["curl", "-s", "-L", "-m", "10", "-x", f"{host}:{port}"]
+    if "username" in proxy_cfg:
+        curl_cmd += ["-U", f"{proxy_cfg['username']}:{proxy_cfg['password']}"]
+    curl_cmd.append("ipinfo.io")
+    try:
+        out = subprocess.check_output(curl_cmd, timeout=15).decode()
+        info = _json.loads(out)
+        return f"{info.get('ip','?')} ({info.get('country','?')}) {info.get('org','?')}"
+    except Exception:
+        return "?"
+
+
 def click_google(page, t):
     """Click the Google OAuth button, return the page/frame that shows Google's
     email field (#identifierId). Google may render in the main frame (URL stays
@@ -145,9 +162,81 @@ def click_google(page, t):
     return None
 
 
-def login_and_get_key(ctx, email, password, idx, total):
+def try_reveal(page, t, idx):
+    """Reveal the 'auto-key' on the API-keys page and extract it. Returns key or None."""
+    try:
+        # Settle + wait for the auto-key row to render (fixes create-then-reveal race)
+        time.sleep(2)
+        # Row could be <tr> or <div> depending on table impl
+        row = page.locator("tr", has_text="auto-key")
+        if row.count() == 0:
+            row = page.locator("div", has_text="auto-key").first
+        try:
+            row.wait_for(state="visible", timeout=12000)
+        except Exception:
+            pass
+        # Eye icon = first button in row (reveal)
+        eye = row.locator("button").first
+        eye.wait_for(state="visible", timeout=12000)
+        eye.click()
+        time.sleep(3)
+    except Exception as e:
+        log(t, f"  Reveal error: {e}", Y)
+        # Try copy button as fallback
+        try:
+            copy = row.locator("button").nth(1)
+            copy.click()
+            time.sleep(1)
+            clip = page.evaluate("navigator.clipboard.readText()")
+            if clip and len(clip) > 20:
+                return clip
+        except:
+            pass
+
+    body = page.inner_text("body")
+    for pat in [r'(tk-[\w-]+)', r'(sk-[\w-]+)', r'(tgk-[\w-]+)', r'(0[\w]{40,})', r'([\w]{40,})']:
+        m = re.findall(pat, body)
+        if m:
+            for k in m:
+                if len(k) > 20 and "auto" not in k.lower() and "tokengo" not in k.lower():
+                    return k
+    return None
+
+
+def reveal_diag(page, idx, label):
+    """On reveal failure, save a screenshot + dump the auto-key row HTML so we
+    can see why the eye-icon wasn't found/visible."""
+    try:
+        (BASE_DIR / "photo").mkdir(exist_ok=True)
+        shot = BASE_DIR / "photo" / f"diag_{label}_{idx:02d}.png"
+        page.screenshot(path=str(shot), full_page=True)
+        row_html = "(row not found)"
+        try:
+            r = page.locator("tr", has_text="auto-key")
+            if r.count() == 0:
+                r = page.locator("div", has_text="auto-key").first
+            if r.count():
+                row_html = r.first.inner_html()
+        except Exception:
+            pass
+        with open(BASE_DIR / "photo" / f"diag_{label}_{idx:02d}.html", "w") as f:
+            f.write(f"URL: {page.url}\n\n")
+            f.write("=== auto-key row HTML ===\n")
+            f.write(row_html + "\n\n")
+            f.write("=== page text (first 2000 chars) ===\n")
+            try:
+                f.write(page.inner_text("body")[:2000])
+            except Exception:
+                pass
+        log(f"[{idx}]", f"  Diagnostik tersimpan: photo/diag_{label}_{idx:02d}.png + .html", Y)
+    except Exception as e:
+        log(f"[{idx}]", f"  diag err: {e}", Y)
+
+
+def login_and_get_key(ctx, email, password, idx, total, proxies=None):
     t = f"[{idx}/{total}]"
     log(t, f"{B}{email}{D}", C)
+    browser = ctx.browser
     page = ctx.new_page()
 
     try:
@@ -230,6 +319,12 @@ def login_and_get_key(ctx, email, password, idx, total):
 
         log(t, "  Logged in OK", G)
 
+        # Capture session cookies so reveal-retry can reuse them under a new proxy
+        try:
+            session_cookies = ctx.cookies()
+        except Exception:
+            session_cookies = []
+
         # API Keys
         log(t, "  /api-keys...", Y)
         page.goto("https://dashboard.tokengo.com/api-keys", wait_until="networkidle")
@@ -268,50 +363,54 @@ def login_and_get_key(ctx, email, password, idx, total):
             page.reload(wait_until="networkidle")
             time.sleep(3)
 
-        # Reveal key via eye icon — retry up to 3x
+        # Reveal key via eye icon + extract (helper)
         log(t, "  Reveal + extract...", Y)
-        apikey = None
-        for reveal_attempt in range(3):
-            try:
-                # Row could be <tr> or <div> depending on table impl
-                row = page.locator("tr", has_text="auto-key")
-                if row.count() == 0:
-                    row = page.locator("div", has_text="auto-key").first
-                # Eye icon = first button in row (reveal)
-                eye = row.locator("button").first
-                eye.wait_for(state="visible", timeout=5000)
-                eye.click()
-                time.sleep(3)
-            except Exception as e:
-                log(t, f"  Reveal error: {e}", Y)
-                # Try copy button as fallback
-                try:
-                    copy = row.locator("button").nth(1)
-                    copy.click()
-                    time.sleep(1)
-                    clip = page.evaluate("navigator.clipboard.readText()")
-                    if clip and len(clip) > 20:
-                        apikey = clip
-                        break
-                except:
-                    pass
+        apikey = try_reveal(page, t, idx)
 
-            body = page.inner_text("body")
-            for pat in [r'(tk-[\w-]+)', r'(sk-[\w-]+)', r'(tgk-[\w-]+)', r'(0[\w]{40,})', r'([\w]{40,})']:
-                m = re.findall(pat, body)
-                if m:
-                    for k in m:
-                        if len(k) > 20 and "auto" not in k.lower() and "tokengo" not in k.lower():
-                            apikey = k
-                            break
-                    if apikey:
-                        break
-            if apikey:
+        # Proxy rotation on reveal failure: new context per proxy, reuse session
+        # cookies (no re-login). Falls back to in-page reload retries if no proxies.
+        pidx = 0
+        while apikey is None and proxies:
+            proxy_cfg = proxies[pidx % len(proxies)]
+            pidx += 1
+            ip = proxy_ip_str(proxy_cfg)
+            log(t, f"  Reveal gagal → retry pakai proxy ke-{pidx} [{G}{ip}{D}]", Y)
+            try:
+                nctx = browser.new_context(
+                    viewport={"width": 1280, "height": 800},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                    permissions=["clipboard-read", "clipboard-write"],
+                    proxy=proxy_cfg,
+                )
+                if session_cookies:
+                    nctx.add_cookies(session_cookies)
+                npage = nctx.new_page()
+                npage.goto("https://dashboard.tokengo.com/api-keys", wait_until="networkidle")
+                time.sleep(2)
+                if "tokengo" not in npage.url:
+                    log(t, "  Session cookie ga valid di proxy ini (redirect sign-in), skip", R)
+                    npage.close()
+                    nctx.close()
+                    continue
+                apikey = try_reveal(npage, t, idx)
+                npage.close()
+                nctx.close()
+            except Exception as e:
+                log(t, f"  proxy retry err: {e}", Y)
+            if pidx >= len(proxies):
                 break
-            if reveal_attempt < 2:
-                log(t, f"  Retry reveal {reveal_attempt+2}/3...", Y)
-                page.reload(wait_until="networkidle")
-                time.sleep(3)
+
+        # Fallback: in-page reload retries (used when no proxies configured)
+        ri = 0
+        while apikey is None and ri < 2:
+            ri += 1
+            log(t, f"  Retry reveal {ri+1}/3...", Y)
+            page.reload(wait_until="networkidle")
+            time.sleep(3)
+            apikey = try_reveal(page, t, idx)
+
+        if apikey is None:
+            reveal_diag(page, idx, "login")
 
         ss(page, f"l{idx:02d}_done")
 
@@ -369,6 +468,8 @@ def main():
     else:
         print(f"  {Y}proxies.txt kosong, jalan tanpa proxy{D}\n")
 
+    retry_proxies = proxies if proxies else []
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=[
             "--no-sandbox",
@@ -379,20 +480,8 @@ def main():
             proxy_cfg = None
             if use_proxy and proxies:
                 proxy_cfg = proxies[(i - 1) % len(proxies)]
-                # Check proxy IP for this account
-                import subprocess, json as _json
-                server = proxy_cfg["server"].replace("http://", "")
-                host, port = server.split(":")
-                curl_cmd = ["curl", "-s", "-L", "-m", "10", "-x", f"{host}:{port}"]
-                if "username" in proxy_cfg:
-                    curl_cmd += ["-U", f"{proxy_cfg['username']}:{proxy_cfg['password']}"]
-                curl_cmd.append("ipinfo.io")
-                try:
-                    out = subprocess.check_output(curl_cmd, timeout=15).decode()
-                    info = _json.loads(out)
-                    log(f"[{i}/{len(todo)}]", f"  Proxy: {G}{info.get('ip','?')} ({info.get('country','?')}) {info.get('org','?')}{D}", G)
-                except Exception as e:
-                    log(f"[{i}/{len(todo)}]", f"  Proxy check failed: {e}", R)
+                ip = proxy_ip_str(proxy_cfg)
+                log(f"[{i}/{len(todo)}]", f"  Proxy: {G}{ip}{D}", G)
 
             ctx_opts = {
                 "viewport": {"width": 1280, "height": 800},
@@ -403,7 +492,7 @@ def main():
                 ctx_opts["proxy"] = proxy_cfg
 
             ctx = browser.new_context(**ctx_opts)
-            result = login_and_get_key(ctx, email, password, i, len(todo))
+            result = login_and_get_key(ctx, email, password, i, len(todo), retry_proxies)
             results.append(result)
             ctx.close()
 
