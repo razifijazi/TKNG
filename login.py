@@ -100,49 +100,56 @@ def login_and_get_key(ctx, email, password, idx, total):
         time.sleep(2)
 
         page.wait_for_selector("#identifierId", state="visible", timeout=15000)
-        page.fill("#identifierId", email)
-        page.click("#identifierNext")
-        page.wait_for_load_state("networkidle")
+        popup.fill("#identifierId", email)
+        popup.click("#identifierNext")
+        popup.wait_for_load_state("networkidle")
         time.sleep(3)
 
         sel = 'input[name="Passwd"]:not([aria-hidden="true"])'
-        page.wait_for_selector(sel, state="visible", timeout=15000)
-        page.fill(sel, password)
-        page.click("#passwordNext")
-        page.wait_for_load_state("networkidle")
+        popup.wait_for_selector(sel, state="visible", timeout=20000)
+        popup.fill(sel, password)
+        popup.click("#passwordNext")
+        popup.wait_for_load_state("networkidle")
         time.sleep(3)
 
         # GSuite speedbump
         try:
-            b = page.locator("button:has-text('I understand')")
+            b = popup.locator("button:has-text('I understand')")
             b.wait_for(state="visible", timeout=5000)
             b.click()
-            page.wait_for_load_state("networkidle")
+            popup.wait_for_load_state("networkidle")
             time.sleep(2)
         except:
             pass
 
         # OAuth consent
-        if "signin/oauth/id" in page.url or "oauth/consent" in page.url:
+        if "signin/oauth/id" in popup.url or "oauth/consent" in popup.url:
             log(t, "  OAuth consent...", Y)
             try:
                 time.sleep(2)
-                cont = page.locator("button:has-text('Continue')")
+                cont = popup.locator("button:has-text('Continue')")
                 cont.wait_for(state="visible", timeout=15000)
                 cont.click()
-                page.wait_for_load_state("networkidle")
+                popup.wait_for_load_state("networkidle")
                 time.sleep(5)
             except:
                 try:
-                    page.reload(wait_until="networkidle")
+                    popup.reload(wait_until="networkidle")
                     time.sleep(3)
-                    cont = page.locator("button:has-text('Continue')")
+                    cont = popup.locator("button:has-text('Continue')")
                     cont.wait_for(state="visible", timeout=10000)
                     cont.click()
-                    page.wait_for_load_state("networkidle")
+                    popup.wait_for_load_state("networkidle")
                     time.sleep(5)
                 except:
                     pass
+
+        # Wait for popup to close after OAuth
+        try:
+            popup.wait_for_event("close", timeout=15000)
+        except:
+            pass
+        time.sleep(2)
 
         # Verify
         if "tokengo" not in page.url:
