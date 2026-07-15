@@ -96,60 +96,78 @@ def register_one(page, email, password, idx, total):
         page.goto(SIGNUP_URL, wait_until="networkidle")
         time.sleep(2)
 
-        # Click Google button — may open popup
-        with page.expect_popup() as popup_info:
-            page.click("button:has-text('Google')")
-        popup = popup_info.value
-        popup.wait_for_load_state("networkidle")
-        time.sleep(2)
+        # Click Google — could open popup or navigate same tab
+        popup = None
+        try:
+            with page.expect_popup(timeout=5000) as popup_info:
+                page.click("button:has-text('Google')")
+            popup = popup_info.value
+            popup.wait_for_load_state("networkidle")
+        except:
+            # No popup — maybe same tab navigated to Google
+            time.sleep(2)
+            if "accounts.google.com" in page.url:
+                popup = page
 
-        popup.wait_for_selector("#identifierId", state="visible", timeout=20000)
-        popup.fill("#identifierId", email)
-        popup.click("#identifierNext")
-        popup.wait_for_load_state("networkidle")
+        if not popup:
+            log(t, "  Google button failed", R)
+            ss(page, f"e{idx:02d}_fail")
+            return email, password, "LOGIN_FAILED"
+
+        target = popup
+
+        target.wait_for_selector("#identifierId", state="visible", timeout=20000)
+        target.fill("#identifierId", email)
+        target.click("#identifierNext")
+        target.wait_for_load_state("networkidle")
         time.sleep(3)
 
         sel = 'input[name="Passwd"]:not([aria-hidden="true"])'
-        popup.wait_for_selector(sel, state="visible", timeout=20000)
-        popup.fill(sel, password)
-        popup.click("#passwordNext")
-        popup.wait_for_load_state("networkidle")
+        target.wait_for_selector(sel, state="visible", timeout=20000)
+        target.fill(sel, password)
+        target.click("#passwordNext")
+        target.wait_for_load_state("networkidle")
         time.sleep(3)
 
         # GSuite speedbump
         try:
-            b = popup.locator("button:has-text('I understand')")
+            b = target.locator("button:has-text('I understand')")
             b.wait_for(state="visible", timeout=5000)
             b.click()
-            popup.wait_for_load_state("networkidle")
+            target.wait_for_load_state("networkidle")
             time.sleep(2)
         except:
             pass
 
-        # OAuth consent — wait for "Continue" button on oauth/id page
-        if "signin/oauth/id" in popup.url or "oauth/consent" in popup.url:
+        # OAuth consent
+        if "signin/oauth/id" in target.url or "oauth/consent" in target.url:
             log(t, "  OAuth consent...", Y)
             try:
-                # Wait for the page to fully load
                 time.sleep(2)
-                cont = popup.locator("button:has-text('Continue')")
+                cont = target.locator("button:has-text('Continue')")
                 cont.wait_for(state="visible", timeout=15000)
                 cont.click()
-                popup.wait_for_load_state("networkidle")
+                target.wait_for_load_state("networkidle")
                 time.sleep(5)
-            except Exception as e:
-                log(t, f"  OAuth click failed, retry...", Y)
-                # Retry: reload and try again
+            except:
                 try:
-                    popup.reload(wait_until="networkidle")
+                    target.reload(wait_until="networkidle")
                     time.sleep(3)
-                    cont = popup.locator("button:has-text('Continue')")
+                    cont = target.locator("button:has-text('Continue')")
                     cont.wait_for(state="visible", timeout=10000)
                     cont.click()
-                    popup.wait_for_load_state("networkidle")
+                    target.wait_for_load_state("networkidle")
                     time.sleep(5)
                 except:
                     pass
+
+        # Wait for popup to close
+        if popup != page:
+            try:
+                popup.wait_for_event("close", timeout=15000)
+            except:
+                pass
+            time.sleep(2)
 
         # Verify login
         if "tokengo" not in page.url:
