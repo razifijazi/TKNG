@@ -95,11 +95,16 @@ def login_and_get_key(ctx, email, password, idx, total):
         # Login
         log(t, "  Login...", Y)
         page.goto(LOGIN_URL, wait_until="networkidle")
-        page.click("button:has-text('Gmail')")
-        page.wait_for_load_state("networkidle")
         time.sleep(2)
 
-        page.wait_for_selector("#identifierId", state="visible", timeout=15000)
+        # Click Google button — opens popup
+        with page.expect_popup() as popup_info:
+            page.click("button:has-text('Google')")
+        popup = popup_info.value
+        popup.wait_for_load_state("networkidle")
+        time.sleep(2)
+
+        popup.wait_for_selector("#identifierId", state="visible", timeout=20000)
         popup.fill("#identifierId", email)
         popup.click("#identifierNext")
         popup.wait_for_load_state("networkidle")
@@ -178,31 +183,28 @@ def login_and_get_key(ctx, email, password, idx, total):
             page.reload(wait_until="networkidle")
             time.sleep(3)
 
-        # Copy key via clipboard
-        log(t, "  Copy key...", Y)
+        # Reveal key via eye icon, then read from page text
+        log(t, "  Reveal + extract...", Y)
         apikey = None
         try:
-            ctx.grant_permissions(["clipboard-read", "clipboard-write"])
             row = page.locator("tr:has-text('auto-key')")
-            copy_btn = row.locator("button").nth(1)
-            copy_btn.click()
-            time.sleep(1)
-            apikey = page.evaluate("navigator.clipboard.readText()")
-        except:
-            try:
-                row = page.locator("tr:has-text('auto-key')")
-                btns = row.locator("button")
-                for i in range(btns.count()):
-                    btns.nth(i).click()
-                    time.sleep(0.5)
-                    try:
-                        apikey = page.evaluate("navigator.clipboard.readText()")
-                        if apikey and len(apikey) > 15:
-                            break
-                    except:
-                        pass
-            except:
-                pass
+            eye = row.locator("button").first
+            eye.click()
+            time.sleep(2)
+        except Exception as e:
+            log(t, f"  Reveal error: {e}", Y)
+
+        # Extract revealed key from page text
+        body = page.inner_text("body")
+        for pat in [r'(tk-[\w-]+)', r'(sk-[\w-]+)', r'(tgk-[\w-]+)', r'(0[\w]{40,})', r'([\w]{40,})']:
+            m = re.findall(pat, body)
+            if m:
+                for k in m:
+                    if len(k) > 20 and "auto" not in k.lower() and "tokengo" not in k.lower():
+                        apikey = k
+                        break
+                if apikey:
+                    break
 
         ss(page, f"l{idx:02d}_done")
 

@@ -178,33 +178,28 @@ def register_one(page, email, password, idx, total):
             page.reload(wait_until="networkidle")
             time.sleep(3)
 
-        # Copy key via clipboard
-        log(t, "  Copy key...", Y)
+        # Reveal key via eye icon, then read from page text
+        log(t, "  Reveal + extract...", Y)
         apikey = None
         try:
-            # Grant clipboard permission
-            ctx.grant_permissions(["clipboard-read", "clipboard-write"])
             row = page.locator("tr:has-text('auto-key')")
-            # Copy button is the 2nd button in the row (after eye)
-            copy_btn = row.locator("button").nth(1)
-            copy_btn.click()
-            time.sleep(1)
-            apikey = page.evaluate("navigator.clipboard.readText()")
-        except:
-            # Fallback: try all buttons in row
-            try:
-                btns = row.locator("button")
-                for i in range(btns.count()):
-                    btns.nth(i).click()
-                    time.sleep(0.5)
-                    try:
-                        apikey = page.evaluate("navigator.clipboard.readText()")
-                        if apikey and len(apikey) > 15:
-                            break
-                    except:
-                        pass
-            except:
-                pass
+            eye = row.locator("button").first
+            eye.click()
+            time.sleep(2)
+        except Exception as e:
+            log(t, f"  Reveal error: {e}", Y)
+
+        # Extract revealed key from page text
+        body = page.inner_text("body")
+        for pat in [r'(tk-[\w-]+)', r'(sk-[\w-]+)', r'(tgk-[\w-]+)', r'(0[\w]{40,})', r'([\w]{40,})']:
+            m = re.findall(pat, body)
+            if m:
+                for k in m:
+                    if len(k) > 20 and "auto" not in k.lower() and "tokengo" not in k.lower():
+                        apikey = k
+                        break
+                if apikey:
+                    break
 
         ss(page, f"e{idx:02d}_done")
 
