@@ -4,3 +4,4 @@ used.txt
 *.pyc
 __pycache__/
 failed.txt
+*.swp
