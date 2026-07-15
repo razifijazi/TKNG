@@ -270,8 +270,23 @@ def main():
 
     use_proxy = False
     if proxies:
-        ans = input(f"  {Y}Gunakan proxy? (on/off) [off]:{D} ").strip().lower()
-        use_proxy = ans in ("on", "y", "yes", "1")
+        ans = input(f"  {Y}Gunakan proxy? (y/n) [n]:{D} ").strip().lower()
+        use_proxy = ans in ("y", "yes")
+        if use_proxy:
+            # Check proxy IP
+            log("", "  Checking proxy...", Y)
+            try:
+                test_ctx = browser.new_context(proxy=proxies[0], viewport={"width": 1280, "height": 800})
+                test_page = test_ctx.new_page()
+                test_page.goto("https://ipinfo.io/json", wait_until="networkidle")
+                info = test_page.evaluate("() => JSON.parse(document.body.innerText)")
+                test_page.close()
+                test_ctx.close()
+                log("", f"  Proxy: {G}{info.get('ip','?')} ({info.get('country','?')}) {info.get('city','?')}{D}", G)
+            except Exception as e:
+                log("", f"  Proxy check failed: {e}", R)
+                ans = input(f"  {Y}Tetap lanjut? (y/n) [n]:{D} ").strip().lower()
+                use_proxy = ans in ("y", "yes")
         print(f"  {'Proxy ON' if use_proxy else 'Proxy OFF'}\n")
     else:
         print(f"  {Y}proxies.txt kosong, jalan tanpa proxy{D}\n")

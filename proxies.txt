@@ -1,5 +1,1 @@
-# format: host:port:user:pass
-# satu proxy per baris
-# contoh:
-# 1.2.3.4:8080:user1:pass1
-# gateway.provider.com:20000:user1:pass1
+global.rotgb.711proxy.com:10000:USER803280-zone-custom:24f2d3
