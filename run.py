@@ -96,46 +96,43 @@ def register_one(page, email, password, idx, total):
         page.goto(SIGNUP_URL, wait_until="networkidle")
         time.sleep(2)
 
-        # Click Google — retry up to 3x (button sometimes not ready)
-        popup = None
-        for attempt in range(3):
+        # Click Google — navigates to same tab
+        btn = page.locator("button:has-text('Google')")
+        btn.wait_for(state="visible", timeout=10000)
+        time.sleep(1)
+        btn.click()
+
+        # Wait for Google login page to appear
+        try:
+            page.wait_for_selector("#identifierId", state="visible", timeout=15000)
+        except:
+            # Retry once — reload and try again
+            log(t, "  Retry...", Y)
+            page.goto(SIGNUP_URL, wait_until="networkidle")
+            time.sleep(3)
+            btn = page.locator("button:has-text('Google')")
+            btn.wait_for(state="visible", timeout=10000)
+            btn.click()
             try:
-                btn = page.locator("button:has-text('Google')")
-                btn.wait_for(state="visible", timeout=10000)
-                time.sleep(1)
-                with page.expect_popup(timeout=8000) as popup_info:
-                    btn.click()
-                popup = popup_info.value
-                popup.wait_for_load_state("networkidle")
-                break
+                page.wait_for_selector("#identifierId", state="visible", timeout=15000)
             except:
-                time.sleep(2)
-                if "accounts.google.com" in page.url:
-                    popup = page
-                    break
-                if attempt < 2:
-                    log(t, f"  Retry {attempt+2}/3...", Y)
-                    page.goto(SIGNUP_URL, wait_until="networkidle")
-                    time.sleep(3)
+                log(t, "  Google button failed", R)
+                ss(page, f"e{idx:02d}_fail")
+                return email, password, "LOGIN_FAILED"
 
-        if not popup:
-            log(t, "  Google button failed after 3 tries", R)
-            ss(page, f"e{idx:02d}_fail")
-            return email, password, "LOGIN_FAILED"
-
-        target = popup
+        target = page
 
         target.wait_for_selector("#identifierId", state="visible", timeout=20000)
         target.fill("#identifierId", email)
         target.click("#identifierNext")
-        target.wait_for_load_state("networkidle")
+        time.sleep(3)
         time.sleep(3)
 
         sel = 'input[name="Passwd"]:not([aria-hidden="true"])'
         target.wait_for_selector(sel, state="visible", timeout=20000)
         target.fill(sel, password)
         target.click("#passwordNext")
-        target.wait_for_load_state("networkidle")
+        time.sleep(3)
         time.sleep(3)
 
         # GSuite speedbump
@@ -143,7 +140,7 @@ def register_one(page, email, password, idx, total):
             b = target.locator("button:has-text('I understand')")
             b.wait_for(state="visible", timeout=5000)
             b.click()
-            target.wait_for_load_state("networkidle")
+            time.sleep(2)
             time.sleep(2)
         except:
             pass
@@ -156,27 +153,19 @@ def register_one(page, email, password, idx, total):
                 cont = target.locator("button:has-text('Continue')")
                 cont.wait_for(state="visible", timeout=15000)
                 cont.click()
-                target.wait_for_load_state("networkidle")
+                time.sleep(3)
                 time.sleep(5)
             except:
                 try:
-                    target.reload(wait_until="networkidle")
+                    time.sleep(3)
                     time.sleep(3)
                     cont = target.locator("button:has-text('Continue')")
                     cont.wait_for(state="visible", timeout=10000)
                     cont.click()
-                    target.wait_for_load_state("networkidle")
+                    time.sleep(3)
                     time.sleep(5)
                 except:
                     pass
-
-        # Wait for popup to close
-        if popup != page:
-            try:
-                popup.wait_for_event("close", timeout=15000)
-            except:
-                pass
-            time.sleep(2)
 
         # Verify login
         if "tokengo" not in page.url:
@@ -201,32 +190,40 @@ def register_one(page, email, password, idx, total):
                 page.locator("button:has-text('Create')").click()
             except:
                 page.locator("button[type='submit']").click()
-            time.sleep(3)
+            time.sleep(5)
             page.reload(wait_until="networkidle")
             time.sleep(3)
 
-        # Reveal key via eye icon, then read from page text
+        # Reveal key via eye icon — retry up to 3x
         log(t, "  Reveal + extract...", Y)
         apikey = None
-        try:
-            row = page.locator("tr:has-text('auto-key')")
-            eye = row.locator("button").first
-            eye.click()
-            time.sleep(2)
-        except Exception as e:
-            log(t, f"  Reveal error: {e}", Y)
+        for reveal_attempt in range(3):
+            try:
+                row = page.locator("tr:has-text('auto-key')")
+                eye = row.locator("button").first
+                eye.click()
+                time.sleep(3)
+            except Exception as e:
+                log(t, f"  Reveal error: {e}", Y)
 
-        # Extract revealed key from page text
-        body = page.inner_text("body")
-        for pat in [r'(tk-[\w-]+)', r'(sk-[\w-]+)', r'(tgk-[\w-]+)', r'(0[\w]{40,})', r'([\w]{40,})']:
-            m = re.findall(pat, body)
-            if m:
-                for k in m:
-                    if len(k) > 20 and "auto" not in k.lower() and "tokengo" not in k.lower():
-                        apikey = k
+            # Extract key from page text
+            body = page.inner_text("body")
+            for pat in [r'(tk-[\w-]+)', r'(sk-[\w-]+)', r'(tgk-[\w-]+)', r'(0[\w]{40,})', r'([\w]{40,})']:
+                m = re.findall(pat, body)
+                if m:
+                    for k in m:
+                        if len(k) > 20 and "auto" not in k.lower() and "tokengo" not in k.lower():
+                            apikey = k
+                            break
+                    if apikey:
                         break
-                if apikey:
-                    break
+            if apikey:
+                break
+            # Reload and retry
+            if reveal_attempt < 2:
+                log(t, f"  Retry reveal {reveal_attempt+2}/3...", Y)
+                page.reload(wait_until="networkidle")
+                time.sleep(3)
 
         ss(page, f"e{idx:02d}_done")
 
@@ -270,25 +267,6 @@ def main():
     if proxies:
         ans = input(f"  {Y}Gunakan proxy? (y/n) [n]:{D} ").strip().lower()
         use_proxy = ans in ("y", "yes")
-        if use_proxy:
-            # Check proxy IP via curl
-            log("", "  Checking proxy...", Y)
-            import subprocess, json as _json
-            px = proxies[0]
-            server = px["server"].replace("http://", "")
-            host, port = server.split(":")
-            curl_cmd = ["curl", "-s", "-L", "-m", "10", "-x", f"{host}:{port}"]
-            if "username" in px:
-                curl_cmd += ["-U", f"{px['username']}:{px['password']}"]
-            curl_cmd.append("ipinfo.io")
-            try:
-                out = subprocess.check_output(curl_cmd, timeout=15).decode()
-                info = _json.loads(out)
-                log("", f"  Proxy: {G}{info.get('ip','?')} ({info.get('country','?')}) {info.get('org','?')}{D}", G)
-            except Exception as e:
-                log("", f"  Proxy check failed: {e}", R)
-                ans = input(f"  {Y}Tetap lanjut? (y/n) [n]:{D} ").strip().lower()
-                use_proxy = ans in ("y", "yes")
         print(f"  {'Proxy ON' if use_proxy else 'Proxy OFF'}\n")
     else:
         print(f"  {Y}proxies.txt kosong, jalan tanpa proxy{D}\n")
@@ -304,6 +282,20 @@ def main():
             proxy_cfg = None
             if use_proxy and proxies:
                 proxy_cfg = proxies[(i - 1) % len(proxies)]
+                # Check proxy IP for this account
+                import subprocess, json as _json
+                server = proxy_cfg["server"].replace("http://", "")
+                host, port = server.split(":")
+                curl_cmd = ["curl", "-s", "-L", "-m", "10", "-x", f"{host}:{port}"]
+                if "username" in proxy_cfg:
+                    curl_cmd += ["-U", f"{proxy_cfg['username']}:{proxy_cfg['password']}"]
+                curl_cmd.append("ipinfo.io")
+                try:
+                    out = subprocess.check_output(curl_cmd, timeout=15).decode()
+                    info = _json.loads(out)
+                    log(f"[{i}/{len(todo)}]", f"  Proxy: {G}{info.get('ip','?')} ({info.get('country','?')}) {info.get('org','?')}{D}", G)
+                except Exception as e:
+                    log(f"[{i}/{len(todo)}]", f"  Proxy check failed: {e}", R)
 
             ctx_opts = {
                 "viewport": {"width": 1280, "height": 800},
