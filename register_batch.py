@@ -172,29 +172,35 @@ def register_one(page, email, password, idx, total):
             page.reload(wait_until="networkidle")
             time.sleep(3)
 
-        # Reveal key
-        log(t, "  Reveal key...", Y)
+        # Copy key via clipboard
+        log(t, "  Copy key...", Y)
+        apikey = None
         try:
+            # Grant clipboard permission
+            ctx.grant_permissions(["clipboard-read", "clipboard-write"])
             row = page.locator("tr:has-text('auto-key')")
-            row.locator("button").first.click()
-            time.sleep(2)
+            # Copy button is the 2nd button in the row (after eye)
+            copy_btn = row.locator("button").nth(1)
+            copy_btn.click()
+            time.sleep(1)
+            apikey = page.evaluate("navigator.clipboard.readText()")
         except:
-            pass
+            # Fallback: try all buttons in row
+            try:
+                btns = row.locator("button")
+                for i in range(btns.count()):
+                    btns.nth(i).click()
+                    time.sleep(0.5)
+                    try:
+                        apikey = page.evaluate("navigator.clipboard.readText()")
+                        if apikey and len(apikey) > 15:
+                            break
+                    except:
+                        pass
+            except:
+                pass
 
         ss(page, f"e{idx:02d}_done")
-
-        # Extract key
-        body = page.inner_text("body")
-        apikey = None
-        for pat in [r'(tk-[\w-]+)', r'(sk-[\w-]+)', r'(tgk-[\w-]+)', r'(0[\w]{30,})']:
-            m = re.findall(pat, body)
-            if m:
-                for k in m:
-                    if len(k) > 15 and "auto" not in k.lower():
-                        apikey = k
-                        break
-                if apikey:
-                    break
 
         if not apikey:
             log(t, "  EXTRACT FAILED", R)
