@@ -275,17 +275,18 @@ def main():
         if use_proxy:
             # Check proxy IP via curl
             log("", "  Checking proxy...", Y)
-            import urllib.request, json as _json
+            import subprocess, json as _json
             px = proxies[0]
-            proxy_url = px["server"].replace("http://", "")
+            server = px["server"].replace("http://", "")
+            host, port = server.split(":")
+            curl_cmd = ["curl", "-s", "-L", "-m", "10", "-x", f"{host}:{port}"]
             if "username" in px:
-                proxy_url = f"http://{px['username']}:{px['password']}@{proxy_url}"
+                curl_cmd += ["-U", f"{px['username']}:{px['password']}"]
+            curl_cmd.append("ipinfo.io")
             try:
-                handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
-                opener = urllib.request.build_opener(handler)
-                resp = opener.open("https://ipinfo.io/json", timeout=10)
-                info = _json.loads(resp.read())
-                log("", f"  Proxy: {G}{info.get('ip','?')} ({info.get('country','?')}) {info.get('city','?')}{D}", G)
+                out = subprocess.check_output(curl_cmd, timeout=15).decode()
+                info = _json.loads(out)
+                log("", f"  Proxy: {G}{info.get('ip','?')} ({info.get('country','?')}) {info.get('org','?')}{D}", G)
             except Exception as e:
                 log("", f"  Proxy check failed: {e}", R)
                 ans = input(f"  {Y}Tetap lanjut? (y/n) [n]:{D} ").strip().lower()
