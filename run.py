@@ -194,18 +194,22 @@ def register_one(page, email, password, idx, total):
                     page.reload(wait_until="networkidle")
                     time.sleep(3)
             time.sleep(2)
-            # Fill name (random/any)
+            # Fill name — button Create disabled until name filled
             try:
-                page.locator("input").first.fill("auto-key")
+                page.locator("#name").fill("auto-key")
             except:
-                pass
-            # Click Create — always "fails" but key IS created
+                try:
+                    page.locator("input#name").fill("auto-key")
+                except:
+                    pass
+            time.sleep(1)
+            # Click Create — always shows "something went wrong" but key IS created
             try:
                 page.locator("button:has-text('Create')").click(timeout=5000)
             except:
                 pass
-            # Immediately reload — created key appears in table
             time.sleep(2)
+            # Reload — created key appears in table
             page.reload(wait_until="networkidle")
             time.sleep(3)
 
