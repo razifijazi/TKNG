@@ -441,6 +441,16 @@ def register_one(page, email, password, idx, total, proxies=None):
         return email, password, f"ERROR:{str(e)[:80]}"
 
 
+def fail_reason(res):
+    if res.startswith("LOGIN_FAILED"):
+        return "kena verif (Google verify/phone challenge)"
+    if res.startswith("EXTRACT_FAILED"):
+        return "gagal reveal API key"
+    if res.startswith("ERROR"):
+        return f"error: {res[6:][:60]}"
+    return res
+
+
 def main():
     accounts = load_accounts()
     if not accounts:
@@ -501,9 +511,15 @@ def main():
             results.append(result)
 
             is_fail = any(result[2].startswith(x) for x in ("ERROR", "LOGIN_FAILED", "EXTRACT_FAILED"))
-            with open(FAILED_FILE if is_fail else RESULT_FILE, "a") as f:
-                f.write(f"{result[0]}|{result[1]}|{result[2]}\n")
-            if not is_fail:
+            if is_fail:
+                ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                reason = fail_reason(result[2])
+                with open(FAILED_FILE, "a") as f:
+                    f.write(f"{result[0]}|{result[1]}|{reason}|{ts}\n")
+                move_to_used(result[0])   # keluar dari email.txt → ga di-retry terus
+            else:
+                with open(RESULT_FILE, "a") as f:
+                    f.write(f"{result[0]}|{result[1]}|{result[2]}\n")
                 move_to_used(result[0])
 
 
